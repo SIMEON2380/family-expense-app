@@ -73,6 +73,70 @@ def make_db(cfg):
             """
         )
 
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budget_years (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER NOT NULL UNIQUE,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budget_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budget_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_year_id INTEGER NOT NULL,
+                category_id INTEGER NOT NULL,
+                original_amount REAL NOT NULL DEFAULT 0,
+                current_amount REAL NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (budget_year_id) REFERENCES budget_years(id),
+                FOREIGN KEY (category_id) REFERENCES budget_categories(id),
+                UNIQUE(budget_year_id, category_id)
+            )
+            """
+        )
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budget_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                budget_line_id INTEGER NOT NULL,
+                old_amount REAL NOT NULL,
+                new_amount REAL NOT NULL,
+                change_amount REAL NOT NULL,
+                reason TEXT,
+                changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (budget_line_id) REFERENCES budget_lines(id)
+            )
+            """
+        )
+
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO budget_categories (name) VALUES
+            ('Rent'),
+            ('Groceries'),
+            ('Transport'),
+            ('Utilities'),
+            ('School'),
+            ('Savings'),
+            ('Other')
+            """
+        )
+
         if not column_exists(cur, "expenses", "shop_name"):
             cur.execute("ALTER TABLE expenses ADD COLUMN shop_name TEXT DEFAULT ''")
 
