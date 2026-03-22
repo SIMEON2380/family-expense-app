@@ -58,7 +58,7 @@ def normalise_bill_name(name: str) -> str:
     return value.strip()
 
 
-def find_matching_column(df: pd.DataFrame, possible_names: list[str]) -> str | None:
+def find_matching_column(df: pd.DataFrame, possible_names: list[str]):
     lower_map = {str(col).strip().lower(): col for col in df.columns}
     for name in possible_names:
         key = name.strip().lower()
@@ -172,7 +172,7 @@ def import_budget_dataframe(df: pd.DataFrame) -> tuple[int, int]:
 
         cur.execute(
             """
-            SELECT id, original_amount, current_amount
+            SELECT id
             FROM budget_lines
             WHERE budget_year_id = ? AND category_id = ?
             """,
@@ -194,32 +194,8 @@ def import_budget_dataframe(df: pd.DataFrame) -> tuple[int, int]:
                 (budget_year_id, category_id, original_amount, current_amount),
             )
             budget_line_id = cur.lastrowid
-            imported_count += 1
-
-            if current_amount != original_amount:
-                cur.execute(
-                    """
-                    INSERT INTO budget_adjustments (
-                        budget_line_id,
-                        old_amount,
-                        new_amount,
-                        change_amount,
-                        reason
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        budget_line_id,
-                        original_amount,
-                        current_amount,
-                        current_amount - original_amount,
-                        "Imported from Excel mid-year adjustment",
-                    ),
-                )
-                adjustment_count += 1
         else:
-            budget_line_id, old_original, old_current = existing
-
+            budget_line_id = existing[0]
             cur.execute(
                 """
                 UPDATE budget_lines
@@ -228,29 +204,30 @@ def import_budget_dataframe(df: pd.DataFrame) -> tuple[int, int]:
                 """,
                 (original_amount, current_amount, budget_line_id),
             )
-            imported_count += 1
 
-            if current_amount != original_amount:
-                cur.execute(
-                    """
-                    INSERT INTO budget_adjustments (
-                        budget_line_id,
-                        old_amount,
-                        new_amount,
-                        change_amount,
-                        reason
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        budget_line_id,
-                        original_amount,
-                        current_amount,
-                        current_amount - original_amount,
-                        "Imported from Excel mid-year adjustment",
-                    ),
+        imported_count += 1
+
+        if current_amount != original_amount:
+            cur.execute(
+                """
+                INSERT INTO budget_adjustments (
+                    budget_line_id,
+                    old_amount,
+                    new_amount,
+                    change_amount,
+                    reason
                 )
-                adjustment_count += 1
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    budget_line_id,
+                    original_amount,
+                    current_amount,
+                    current_amount - original_amount,
+                    "Imported from Excel mid-year adjustment",
+                ),
+            )
+            adjustment_count += 1
 
     con.commit()
     con.close()
@@ -262,25 +239,35 @@ uploaded_file = st.file_uploader("Upload budget Excel file", type=["xlsx", "xls"
 
 if uploaded_file is not None:
     try:
-        workbook = pd.read_excel(uploaded_file, sheet_name=None)
+        with st.spinner("Reading workbook..."):
+            excel_file = pd.ExcelFile(uploaded_file, engine="openpyxl")
+            st.write("Sheets found:", excel_file.sheet_names)
+
+            year_sheets: dict[int, pd.DataFrame] = {}
+
+            for sheet_name in excel_file.sheet_names:
+                sheet_name_clean = str(sheet_name).strip()
+                if sheet_name_clean.isdigit() and len(sheet_name_clean) == 4:
+                    sheet_df = pd.read_excel(
+                        excel_file,
+                        sheet_name=sheet_name,
+                        engine="openpyxl",
+                    )
+                    year_sheets[int(sheet_name_clean)] = sheet_df
+
     except Exception as exc:
         st.error(f"Could not read Excel file: {exc}")
         st.stop()
-
-    year_sheets: dict[int, pd.DataFrame] = {}
-
-    for sheet_name, sheet_df in workbook.items():
-        sheet_name_clean = str(sheet_name).strip()
-        if sheet_name_clean.isdigit() and len(sheet_name_clean) == 4:
-            year_sheets[int(sheet_name_clean)] = sheet_df
 
     if not year_sheets:
         st.warning("No year sheets found. Sheet names should look like 2024, 2025, 2026.")
         st.stop()
 
     all_parsed = []
+    progress = st.progress(0, text="Parsing sheets...")
 
-    for year, sheet_df in sorted(year_sheets.items()):
+    total_sheets = len(year_sheets)
+    for index, (year, sheet_df) in enumerate(sorted(year_sheets.items()), start=1):
         parsed_df = parse_budget_sheet(sheet_df, year)
 
         st.subheader(f"Preview: {year}")
@@ -290,6 +277,8 @@ if uploaded_file is not None:
             st.dataframe(parsed_df, use_container_width=True, hide_index=True)
             all_parsed.append(parsed_df)
 
+        progress.progress(int(index / total_sheets * 100), text=f"Parsed {year}")
+
     if all_parsed:
         combined_df = pd.concat(all_parsed, ignore_index=True)
 
@@ -298,7 +287,9 @@ if uploaded_file is not None:
         st.write(f"Rows ready to import: {len(combined_df)}")
 
         if st.button("Import Budget Data"):
-            imported_count, adjustment_count = import_budget_dataframe(combined_df)
+            with st.spinner("Importing budget data into database..."):
+                imported_count, adjustment_count = import_budget_dataframe(combined_df)
+
             st.success(
                 f"Import complete. {imported_count} budget rows processed and "
                 f"{adjustment_count} adjustment history rows created."
