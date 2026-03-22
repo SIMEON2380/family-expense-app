@@ -124,21 +124,18 @@ def make_db(cfg):
             """
         )
 
-        cur.execute(
-            """
-            INSERT OR IGNORE INTO budget_categories (name) VALUES
-            ('Rent'),
-            ('Groceries'),
-            ('Transport'),
-            ('Utilities'),
-            ('School'),
-            ('Savings'),
-            ('Other')
-            """
-        )
-
         if not column_exists(cur, "expenses", "shop_name"):
             cur.execute("ALTER TABLE expenses ADD COLUMN shop_name TEXT DEFAULT ''")
+
+        # Insert budget bill names from config
+        for bill_name in getattr(cfg, "BILL_NAMES", []):
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO budget_categories (name)
+                VALUES (?)
+                """,
+                (bill_name,),
+            )
 
         conn.commit()
         conn.close()

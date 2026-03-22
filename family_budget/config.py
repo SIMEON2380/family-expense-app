@@ -21,6 +21,23 @@ class Config:
         "Other",
     ]
 
+    BILL_NAMES = [
+        "Mortgage",
+        "Council Tax",
+        "Water",
+        "Verisure Services",
+        "Greenbelt",
+        "TV Licence",
+        "EE Phone",
+        "Food",
+        "Children Development",
+        "Window Cleaning",
+        "Virgin Media",
+        "Home Insurance",
+        "Virgin Water (Outtrap)",
+        "Sofa (V12 Finance)",
+    ]
+
     EXPENSE_TYPES = [
         "Fixed",
         "Variable",
